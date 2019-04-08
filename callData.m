@@ -18,13 +18,13 @@ classdef callData
         treatmentType
         lesionedBats % which bats are lesioned (logical)
         nBats % number of bats
-        cepstralFlag = true % perform cepstral analysis?
+        cepstralFlag = false % perform cepstral analysis?
         spCorrFlag = false % perform spCorr analysis?
         batName %name of bat pairs in training
         batchNum % for experiments in separate batches
         callNum %call number (subset of recNum)
         recNum %recording number for the training session
-        callTrigger %dt for autTrain
+        callTrigger %dt for autoTrain
         callType %'callOnly' or 'callTrigger'
         sessionType %experiment type in the autoTrain
         sessionID %numerical counter for each sessionTye
@@ -34,7 +34,10 @@ classdef callData
         callEcho % flag to load either calls or echolocations
         loggerNum % audio logger serial number
         manual_call_class % variable to store potenial manual classification
-        
+        lowPass
+        highPass
+        trig
+        shift
         fs % sampling rate
         expType % String indicating which experiment we are dealing with
         
@@ -118,12 +121,13 @@ classdef callData
             for call_k = 1:cData.nCalls
                 
                 if cData.loadWF % if we already loaded all the data into this object
-                    callWF = cData.callWF{call_k};
+                callWF = cData.callWF{call_k};
                 else % if we need to load this data on the fly
                     if ~isempty(cData.fName{call_k})
                         callWF = loadCallWF_onTheFly(cData,call_k);
                         cData.callLength(call_k) = length(callWF)/fs;
                     end
+                
                 end
                 
                 % Assemble parameter structure for yin algorithm
@@ -135,7 +139,9 @@ classdef callData
                     'bufsize',nSamples+2,'APthresh',2.5,...
                     'maxf0',cData.maxF0,'minf0',cData.minF0);
                 
-                addpath('C:\Userslo\bassp\Downloads\Python Work\Rotation_3\Matlab_Code\yin\')                
+                %addpath('C:\Users\phyllo\Documents\MATLAB\yin\')
+                %addpath('C:\Users\Julie\workspace\neurobat-callData')
+                addpath('C:\Users\bassp\Downloads\Python Work\Rotation_3\Matlab_Code\yin\yin\')
                 [f0, ap0] = calculate_yin_F0(callWF,yinParams,cData.yinF0_interp);
                 cData.yinF0Win{call_k} = f0;
                 cData.ap0Win{call_k} = ap0;
@@ -143,10 +149,9 @@ classdef callData
                 % take the F0 for the window of the call with the "best"
                 % (i.e. lowest) aperiodicity) **No longer using this
                 % method**
-                % [~, idx] = min(ap0);
-               % cData.yinF0(call_k) = f0(idx);
-               %
-               cData.ap0(call_k) = ap0(idx);
+                 [~, idx] = min(ap0);
+                 cData.yinF0(call_k) = f0(idx);
+                 cData.ap0(call_k) = ap0(idx);
                 cData.yinF0(call_k) = nanmedian(f0);
                 cData.ap0(call_k) = nanmedian(ap0);
                 
@@ -222,6 +227,7 @@ classdef callData
                     [cData.daysOld, cData.callLength] = deal(zeros(cData.maxCalls,1));
                     cData.callPos = zeros(cData.maxCalls,2);
                     cData.file_call_pos = zeros(cData.maxCalls,2);
+                    
                     cData.expDay = datetime([],[],[]);
                     nlg_rec_str = 'neurologger_recording';
                     
@@ -354,7 +360,7 @@ classdef callData
                     [cData.callWF, cData.fName, cData.treatment] = deal(cell(cData.maxCalls,1));
                     [cData.callLength, cData.daysOld, cData.batchNum] = deal(zeros(cData.maxCalls,1));
                     cData.expDay = datetime([],[],[]);
-                    cData.callID = [1:cData.maxCalls];
+                    cData.callID = [1:cData.maxCalls]';
                     
                     treatmentGroups = fieldnames(batInfo)';
                     
@@ -475,46 +481,159 @@ classdef callData
                     cData.expDay = cData.expDay';
                 case 'autoTrain'
                     cData.loadWF = false;
-                    cData.baseDirs = 'C:\Users\bassp\Downloads\Python Work\Rotation_3\Bat audio samples\Bat audio samples\';
+                    %cData.baseDirs = 'Y:\users\tobias\vocOperant\box7\bataudio\preShift\Analyzed_auto\';
+                    %cData.baseDirs = 'Y:\users\tobias\vocOperant\box7\bataudio\shift_20-25\triggered\Analyzed_auto\';
+                    %cData.baseDirs = 'Y:\users\tobias\vocOperant\box1\bataudio\Iterative\';
+                    cData.baseDirs = 'C:\Users\bassp\Downloads\Python Work\Rotation 1\reexamples\h5files\';
+                    %cData.baseDirs = 'Y:\users\tobias\vocOperant\box7\bataudio\noShift\Detected_calls\Translated_files\Analyzed_auto\';
                     %cData.baseDirs = 'C:\Users\tobias\Desktop\analysis\bataudio\call groups\all\';
                     %cData.baseDirs = 'C:\Users\tobias\Desktop\analysis\bataudio\April2017\cut_preprocessed\';
                     %cData.baseDirs = 'C:\Users\tobias\Desktop\analysis\bataudio\test\';
+                    %files = dir(cData.basedir);
+                    % Get a logical vector that tells which is a directory.
+                    %dirFlags = [files.isdir];
+                    % Extract only those that are directories.
+                    %subFolders = files(dirFlags);
+                    %for k = 1 : length(subFolders) % remember to add an
+                    %end, also! add subfolders+Analyzed_auto\ to callFiles flag
+                    % add check for Analyzed_auto in dirs as well so we
+                    % dont iterate over folders without Analyzed_auto
                     callFiles = dir([cData.baseDirs '*.mat']);
+                    % WRITE CASE FOR HYPERPARAMS VS NONHYPERPARAMS,
+                    % findFIELD or SEEKSTRUCT
+                    
                     cData.nCalls = length(callFiles);
                     [cData.fName, cData.batName, cData.callType, cData.micType, cData.sessionType] = deal(cell(cData.nCalls,1)); % initialize call data cells
                     [cData.recNum, cData.callNum, cData.xrun, cData.sessionID,] = deal(zeros(cData.nCalls,1)); % initialize call data arrays
-                    cData.expDay = datetime([],[],[]);
+                    %cData.expDay = datetime([],[],[]);
                     for call_k = 1:length(callFiles)
                         s = load([cData.baseDirs callFiles(call_k).name]);
-                        cData.fName{call_k} = callFiles(call_k).name;
-                        cData.batName{call_k} = s.batName;
-                        cData.sessionType{call_k} = s.sessionType;
-                        %cData.callWF{call_k} = s.rawData';
-                        cData.callNum(call_k) = s.callNum;
-                        %cData.recNum(call_k) = s.recNum;
-                        sessID = s.sessionID;
-                        if ischar(sessID)
-                            sessID = str2double(sessID);
-                        end
-                        if size(sessID) == [1 2]
-                            sessID = 0;
-                        end
-                        cData.sessionID(call_k) = sessID;
-                        if isfield(s,'xrun')
-                            cData.xrun(call_k) = s.xrun;
+                        si_x = isfield(s,'hyperparams');
+                        if si_x == 1
+                            cData.fName{call_k} = callFiles(call_k).name;
+                            
+                            try
+                                cData.batName{call_k} = s.hyperparams.batName;
+                            catch
+                                cData.batName{call_k} = 'CoEd';
+                            end
+                            try
+                                cData.sessionType{call_k} = s.sessionType;
+                            catch
+                                cData.sessionType{call_k} = 0;
+                            end
+                            %cData.callWF{call_k} = s.rawData';
+                            cData.callNum(call_k) = s.hyperparams.callNum;
+                            
+                            
+                            cData.lowPass(call_k) = (s.hyperparams.lowpass);
+                            try
+                                cData.highPass(call_k)= str2double(s.hyperparams.highpass);
+                            catch
+                                cData.highPass(call_k) = 0;
+                            end
+                            cData.trig(call_k) = s.istrigger;
+                            cData.shift(call_k) = s.hyperparams.Shift;
+                            sessID = s.hyperparams.sessID;
+                            if ischar(sessID)
+                                sessID = str2double(sessID);
+                            end
+                            if size(sessID) == [1 2]
+                                sessID = 0;
+                            end
+                            cData.sessionID(call_k) = sessID;
+                            if isfield(s,'xrun')
+                                cData.xrun(call_k) = s.hyperparams.xrun;
+                            else
+                                cData.xrun(call_k) = 0;
+                            end
+                            if isfield(s,'callTrigger')
+                                cData.exp
+                                expDay(call_k) = s.hyperparams.Date;
+                            else
+                                formatout = 'yyyymmdd';
+                                A = datestr(datenum(s.hyperparams.Date,'yymmdd',2000),formatout);
+                                %s.Date = datestr(s.Date,dateformat);
+                                cData.expDay(call_k) = str2double(A);
+                            end
+                            try
+                                cData.callType{call_k} = s.hyperparams.callType;
+                            catch
+                                if cData.trig == 1
+                                    cData.callType{call_k} = 'VocTrigger';
+                                else
+                                    cData.callType{call_k} = 'NoTrigger';
+                                end
+                            end
+                            cData.micType{call_k} = s.hyperparams.micType;
+                        
+                            cData.expDay = cData.expDay';
                         else
-                            cData.xrun(call_k) = 0;
+                            cData.fName{call_k} = callFiles(call_k).name;
+                            
+                            try
+                                cData.batName{call_k} = s.batName;
+                            catch
+                                cData.batName{call_k} = 'CoEd';
+                            end
+                            try
+                                cData.sessionType{call_k} = s.sessionType;
+                            catch
+                                cData.sessionType{call_k} = 0;
+                            end
+                            %cData.callWF{call_k} = s.rawData';
+                            try
+                                cData.callNum(call_k) = s.callNum;
+                            catch
+                                cData.callNum(call_k) = 0;
+                            end
+                            
+                            cData.lowPass(call_k) = (s.lowpass);
+                            try
+                                cData.highPass(call_k)= str2double(s.highpass);
+                            catch
+                                cData.highPass(call_k) = 0;
+                            end
+                            cData.trig(call_k) = s.istrigger;
+                            cData.shift(call_k) = s.Shift;
+                            sessID = s.sessID;
+                            if ischar(sessID)
+                                sessID = str2double(sessID);
+                            end
+                            if size(sessID) == [1 2]
+                                sessID = 0;
+                            end
+                            cData.sessionID(call_k) = sessID;
+                            if isfield(s,'xrun')
+                                cData.xrun(call_k) = s.xrun;
+                            else
+                                cData.xrun(call_k) = 0;
+                            end
+                            if isfield(s,'callTrigger')
+                                cData.expDay(call_k) = s.Date;
+                            else
+                                formatout = 'yyyymmdd';
+                                A = datestr(datenum(s.Date,'yymmdd',2000),formatout);
+                                %s.Date = datestr(s.Date,dateformat);
+                                cData.expDay(call_k) = str2double(A);
+                            end
+                            try
+                                cData.callType{call_k} = s.callType;
+                            catch
+                                if cData.trig == 1
+                                    cData.callType{call_k} = 'VocTrigger';
+                                else
+                                    cData.callType{call_k} = 'NoTrigger';
+                                end
+                            end
+                            try
+                                cData.micType{call_k} = s.micType;
+                            catch
+                                cData.micType{call_k}=0;
+                            end
                         end
-                        if isfield(s,'callTrigger')
-                            %cData.expDay(call_k) = s.callTrigger;
-                        else
-                            %cData.expDay(call_k) = s.dt;
-                        end
-                        %cData.callType{call_k} = s.callType;
-                        %cData.micType{call_k} = s.micType;
+                        cData.expDay = cData.expDay';
                     end
-                    cData.expDay = cData.expDay';
-                    
                 case 'pratData'
                     cData.loadWF = false;
                     cData.baseDirs = 'E:\Yossi_vocalization_data\';
@@ -672,7 +791,7 @@ classdef callData
                 end
             end
             
-            cData.callID = reshape(cData.callID,[1 :cData.nCalls]);
+%            cData.callID = reshape(cData.callID,[1 cData.nCalls]);
             
         end
         function varargout = subsref(cData,S)
@@ -770,6 +889,30 @@ classdef callData
                                         end
                                         callIdx = callIdx & sessionTypeIdx;
                                         %callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.sessionType);
+                                    case 'lowPass'
+                                        lowPassIdx = false(cData.nCalls,1);
+                                        for sT = S(1).subs{idx+1}
+                                            lowPassIdx = lowPassIdx | cData.lowPass==sT;
+                                        end
+                                        callIdx = callIdx & lowPassIdx;
+                                    case 'highPass'
+                                        highPassIdx = false(cData.nCalls,1);
+                                        for sT = S(1).subs{idx+1}
+                                            highPassIdx = highPassIdx | cData.highPass == sT;
+                                        end
+                                        callIdx = callIdx & highPassIdx;
+                                    case 'trig'
+                                        trigIdx = false(cData.nCalls,1);
+                                        for sT = S(1).subs(idx+1)
+                                            trigIdx = trigIdx | cData.trig == sT;
+                                        end
+                                        callIdx = callIdx & trigIdx;
+                                    case 'shift'
+                                        shiftIdx = false(cData.nCalls,1);
+                                        for sT = S(1).subs(idx+1)
+                                            shiftIdx = shiftIdx | cData.shift == sT;
+                                        end
+                                        callIdx = callIdx & shiftIdx
                                     case 'xrun'
                                         callIdx = callIdx & cellfun(@(x) ~isempty(strfind(x,S(1).subs{idx+1})),cData.xrun);
                                     otherwise
@@ -1043,7 +1186,10 @@ switch cData.expType
     case 'autoTrain'
         if ~isempty(cData.fName{call_k})
             callWF = load([cData.baseDirs cData.fName{call_k}]);
-            %callWF = callWF.convData';
+            % 3 switch statements for 'recbuf','cut', and 'dataRaw'
+            % use an ifexist clause
+            
+            callWF = callWF.cut;
         end
     case 'deafened'
         callWF = load(cData.fName{call_k});
